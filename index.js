@@ -18,7 +18,7 @@ const DRY_RUN = env.DRY_RUN === 'true';                      // prints instead o
 const TOKEN = env.DISCORD_TOKEN || 'MTU1OTc0MjQxNTkwMzAwMjc0NQ.Gul285.Cxb4NFo2vYJCJ6Q_u8MXIxfyvIFZv8IPjVemII';
 const CHANNEL_ID = env.CHANNEL_ID || '1559741650903760999';
 const LOG_CHANNEL_ID = env.LOG_CHANNEL_ID || CHANNEL_ID;
-const API_KEY = env.API_KEY || '';
+const API_KEY = env.API_KEY || 'IEC_Roblox_7f9a2c81d4e6b3a0_secret';
 const GUILD_ID = env.GUILD_ID || '1533511210320924712';
 const PORT = Number(env.PORT || 3000);
 const STATUS_MESSAGE = (env.STATUS_MESSAGE ?? 'true') !== 'false';
