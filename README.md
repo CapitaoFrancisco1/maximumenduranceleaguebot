@@ -48,6 +48,13 @@ Check it from a terminal (replace the address and the key):
 curl -X POST https://YOUR-BOT-ADDRESS/event -H "x-api-key: YOUR_KEY" -H "content-type: application/json" -d '{"type":"test"}'
 ```
 
+### Running it on Render
+
+* Put `index.js`, `format.js`, `package.json` (and `.gitignore`) in the **root** of your repository. Do NOT upload `.env`.
+* New **Web Service**, runtime **Node**, Build Command `npm install`, Start Command `npm start`, Root Directory empty.
+* **Environment** tab: add `DISCORD_TOKEN`, `CHANNEL_ID`, `API_KEY` (and `GUILD_ID`, `LOG_CHANNEL_ID` if you use them). Render sets `PORT` by itself.
+* The free plan puts the service to sleep after about 15 minutes without web traffic: the bot goes offline and the first message from Roblox waits for it to wake up. For a race night use a paid instance, or keep it awake with an uptime monitor that opens `https://YOUR-BOT-ADDRESS/health` every 5 minutes.
+
 ## 3. Roblox side
 
 1. **Game Settings -> Security -> Allow HTTP Requests = ON** (and publish the game).
@@ -59,7 +66,7 @@ Keep the key inside that script only. Never put it in a ModuleScript, Replicated
 
 ## Changing the wording
 
-All the texts, emojis and colours are in `src/format.js`. Switches in `.env`:
+All the texts, emojis and colours are in `format.js`. Switches in `.env`:
 `STATUS_MESSAGE=false` (no live message), `LOG_CHANGES=false` (no line per change), `LOG_CHANNEL_ID` (penalties / messages in another channel).
 
 ## Troubleshooting
