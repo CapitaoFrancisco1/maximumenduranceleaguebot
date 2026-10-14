@@ -1,0 +1,17 @@
+{
+  "name": "race-control-bot",
+  "version": "1.0.0",
+  "description": "Posts the Roblox race status (flags, sessions, penalties) in a Discord race control channel",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "DRY_RUN=true node src/index.js"
+  },
+  "engines": { "node": ">=18" },
+  "dependencies": {
+    "discord.js": "^14.16.3",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.1"
+  }
+}
