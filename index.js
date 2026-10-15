@@ -176,8 +176,12 @@ app.post('/event', (req, res) => {
   const ip = req.ip;
   hits.set(ip, (hits.get(ip) || 0) + 1);
   if (hits.get(ip) > 240) return res.status(429).json({ ok: false, error: 'slow down' });
-  if (!authorised(req)) return res.status(401).json({ ok: false, error: 'wrong api key' });
+  if (!authorised(req)) {
+    console.warn('[event] REJECTED: the x-api-key sent by Roblox is not the same as API_KEY on this server');
+    return res.status(401).json({ ok: false, error: 'wrong api key' });
+  }
   if (!req.body || typeof req.body !== 'object') return res.status(400).json({ ok: false, error: 'json body needed' });
+  console.log('[event]', req.body.type, req.body.state || req.body.kind || req.body.mode || '');
   if (!handleEvent(req.body)) return res.status(400).json({ ok: false, error: 'unknown event type' });
   res.json({ ok: true });
 });
@@ -185,10 +189,30 @@ app.post('/event', (req, res) => {
 app.listen(PORT, () => console.log(`HTTP listening on port ${PORT}`));
 
 // ---- start discord -----------------------------------------------------------------------------------------------
+process.on('unhandledRejection', (err) => console.error('[unhandled]', err?.message || err));
+
 if (!DRY_RUN) {
+  console.log(`Node ${process.version} - connecting to Discord...`);
+  console.log(`Settings found: DISCORD_TOKEN=${TOKEN ? 'yes (' + TOKEN.length + ' characters)' : 'NO'}, CHANNEL_ID=${CHANNEL_ID ? 'yes' : 'NO'}, API_KEY=${API_KEY ? 'yes' : 'NO'}, GUILD_ID=${GUILD_ID ? 'yes' : 'no'}`);
+
+  // gateway / network problems used to be silent: now they are printed
+  client.on(Events.Error, (err) => console.error('[discord] client error:', err?.message || err));
+  client.on(Events.Warn, (msg) => console.warn('[discord] warning:', msg));
+  client.on(Events.ShardError, (err) => console.error('[discord] connection error:', err?.message || err));
+  client.on(Events.ShardReady, (id) => console.log(`[discord] shard ${id} connected`));
+  client.on(Events.ShardDisconnect, (event, id) => console.warn(`[discord] shard ${id} disconnected (code ${event?.code})`));
+  client.rest.on('rateLimited', (info) => console.warn(`[discord] RATE LIMITED on ${info.method} ${info.route}: wait ${Math.ceil((info.timeToReset || 0) / 1000)}s (global: ${info.global})`));
+  if (env.DEBUG_DISCORD === 'true') client.on(Events.Debug, (msg) => console.log('[discord debug]', msg));
+
+  const watchdog = setInterval(() => {
+    if (ready) { clearInterval(watchdog); return; }
+    console.error('[discord] still NOT connected to Discord after waiting. Possible reasons: wrong DISCORD_TOKEN on this host, this host\'s IP address is blocked / rate limited by Discord, or an unsupported Node version. Set DEBUG_DISCORD=true to see more.');
+  }, 30_000);
+  watchdog.unref();
+
   client.once(Events.ClientReady, async (c) => {
     ready = true;
-    console.log(`Logged in as ${c.user.tag}`);
+    console.log(`Logged in as ${c.user.tag} - the bot is in ${c.guilds.cache.size} server(s)`);
     try { await channelOf(CHANNEL_ID); console.log('Race control channel found.'); }
     catch (err) { console.error('CANNOT USE CHANNEL_ID:', err.message, '- is the bot in the server and allowed to see / write in that channel?'); }
 

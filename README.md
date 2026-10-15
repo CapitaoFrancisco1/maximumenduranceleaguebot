@@ -48,11 +48,21 @@ Check it from a terminal (replace the address and the key):
 curl -X POST https://YOUR-BOT-ADDRESS/event -H "x-api-key: YOUR_KEY" -H "content-type: application/json" -d '{"type":"test"}'
 ```
 
+### Running it on your own computer first (to check it works)
+
+```
+cd race-control-bot-render
+npm install               # IMPORTANT: downloads discord.js, express and dotenv. Without this, npm start fails with ERR_MODULE_NOT_FOUND
+```
+Then create a file called `.env` in that folder (it starts with a dot, so Finder hides it - create it from VS Code) with the lines of `.env.example` filled in, and run `npm start`. To test without Discord: `DRY_RUN=true API_KEY=test npm start`.
+
 ### Running it on Render
 
 * Put `index.js`, `format.js`, `package.json` (and `.gitignore`) in the **root** of your repository. Do NOT upload `.env`.
-* New **Web Service**, runtime **Node**, Build Command `npm install`, Start Command `npm start`, Root Directory empty.
+* New **Web Service**, runtime **Node**, Build Command `npm install`, Start Command `npm start` (not `node src/index.js`), Root Directory empty. After changing a setting press **Manual Deploy -> Clear build cache & deploy**.
 * **Environment** tab: add `DISCORD_TOKEN`, `CHANNEL_ID`, `API_KEY` (and `GUILD_ID`, `LOG_CHANNEL_ID` if you use them). Render sets `PORT` by itself.
+* `package.json` and `.node-version` ask for **Node 22**. If your Render service still shows a different version in the deploy log, add the environment variable `NODE_VERSION` = `22`.
+* Open `https://YOUR-BOT-ADDRESS/health`: it must say `"discordReady":true`. `false` means the bot is NOT connected to Discord - read the deploy log: it now prints why.
 * The free plan puts the service to sleep after about 15 minutes without web traffic: the bot goes offline and the first message from Roblox waits for it to wake up. For a race night use a paid instance, or keep it awake with an uptime monitor that opens `https://YOUR-BOT-ADDRESS/health` every 5 minutes.
 
 ## 3. Roblox side
