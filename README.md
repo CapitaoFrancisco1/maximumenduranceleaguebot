@@ -12,6 +12,7 @@ What shows up in the channel:
 |---|---|
 | presses FCY | `🟡 FCY ACTIVE - Full Course Yellow - slow down, no overtaking.` (and "Race control: name") |
 | presses Yellow / Double yellow / Slow zone on a sector | `🟡 YELLOW FLAG - Yellow flag in sector 2` |
+| presses **Delayed** (start lights) | `🔴 DELAYED START - all five red lights stay on, stand by` (also shown in the live status while it is up). Start sequence, lights out, abort and "delay over" get a line too. |
 | presses Safety Car, Red, Green, Pit exit closed, Last lap, Chequered, SS / RS ... | one line each, colour coded |
 | starts / ends a session | `🏁 RACE STARTED - Session length: 1:30:00` |
 | changes the pit exit lights | `🚦 PIT EXIT LIGHTS` |

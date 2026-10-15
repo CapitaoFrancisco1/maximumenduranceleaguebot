@@ -3,6 +3,7 @@
 // The bot turns them into messages in your race control channel:
 //   * a LIVE STATUS message that is edited in place (session, track status, sectors, pit exit)
 //   * a new line for every flag change ("FCY ACTIVE", "YELLOW FLAG - sector 2", ...)
+//   * start lights: DELAYED START, start aborted, lights out
 //   * session start / end, pit exit lights, and (optional) penalties / race control messages
 
 import 'dotenv/config';
@@ -11,7 +12,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import express from 'express';
 import { Client, GatewayIntentBits, Events, REST, Routes, SlashCommandBuilder } from 'discord.js';
-import { flagEmbed, statusEmbed, sessionEmbed, pitEmbed, logEmbed } from './format.js';
+import { flagEmbed, statusEmbed, sessionEmbed, pitEmbed, logEmbed, startEmbed } from './format.js';
 
 const env = process.env;
 const DRY_RUN = env.DRY_RUN === 'true';                      // prints instead of sending (for testing without Discord)
@@ -50,7 +51,7 @@ function save() {
 // ---- what the race looks like right now ---------------------------------------------------------------
 const current = {
   state: 'none', sector: '', sectors: ['none', 'none', 'none'], mode: '', timer: 0, paused: false, countdown: 0,
-  pit: { green: false, blue: false, red: false }, by: '', updatedAt: Date.now(),
+  pit: { green: false, blue: false, red: false }, by: '', start: '', updatedAt: Date.now(),
 };
 
 // ---- discord ------------------------------------------------------------------------------------------
@@ -135,6 +136,17 @@ function handleEvent(ev) {
       refreshStatus();
       break;
     }
+    case 'startlights': {
+      // DELAYED START / start aborted / start sequence / lights out (sent by the DiscordRelay script)
+      const state = String(ev.state || '').toLowerCase();
+      const embed = startEmbed({ ...ev, state }, now);
+      if (!embed) return false;
+      current.start = (state === 'delayed' || state === 'aborted') ? state : ''; // the live status shows it only while it is up
+      current.updatedAt = now;
+      if (LOG_CHANGES) enqueue(() => sendEmbed(CHANNEL_ID, embed));
+      refreshStatus();
+      break;
+    }
     case 'log': {
       enqueue(() => sendEmbed(LOG_CHANNEL_ID, logEmbed(ev, now)));
       break;
@@ -194,31 +206,6 @@ process.on('unhandledRejection', (err) => console.error('[unhandled]', err?.mess
 if (!DRY_RUN) {
   console.log(`Node ${process.version} - connecting to Discord...`);
   console.log(`Settings found: DISCORD_TOKEN=${TOKEN ? 'yes (' + TOKEN.length + ' characters)' : 'NO'}, CHANNEL_ID=${CHANNEL_ID ? 'yes' : 'NO'}, API_KEY=${API_KEY ? 'yes' : 'NO'}, GUILD_ID=${GUILD_ID ? 'yes' : 'no'}`);
-
-  console.log(`DEBUG_DISCORD is ${env.DEBUG_DISCORD === 'true' ? 'ON' : 'OFF (value seen: ' + JSON.stringify(env.DEBUG_DISCORD ?? null) + ')'}`);
-
-  // ---- connection probe: tells exactly WHY the bot does not connect (token / blocked IP / gateway) ----------
-  (async () => {
-    try {
-      const r = await fetch('https://discord.com/api/v10/gateway/bot', { headers: { Authorization: `Bot ${TOKEN}` } });
-      const body = (await r.text()).replace(/\s+/g, ' ').slice(0, 160);
-      let verdict = '';
-      if (r.status === 200) verdict = 'OK: the token is valid and this host can reach Discord';
-      else if (r.status === 401) verdict = 'THE DISCORD_TOKEN IS WRONG (reset it in the Developer Portal -> Bot and paste it again, no quotes / spaces)';
-      else if (r.status === 429 || r.status === 403 || /1015|cloudflare|banned/i.test(body)) verdict = 'THIS HOST\'S IP ADDRESS IS BLOCKED / RATE LIMITED BY DISCORD (Cloudflare). Redeploy later or use another host';
-      console.log(`[probe] discord.com REST -> HTTP ${r.status} - ${verdict} | ${body}`);
-    } catch (err) {
-      console.error('[probe] cannot reach discord.com at all:', err?.message || err);
-    }
-    try {
-      const ws = new WebSocket('wss://gateway.discord.gg/?v=10&encoding=json');
-      const timer = setTimeout(() => { console.error('[probe] gateway.discord.gg: NO ANSWER in 15 s (the websocket connection is blocked from this host)'); try { ws.close(); } catch {} }, 15_000);
-      ws.addEventListener('message', (m) => { clearTimeout(timer); console.log('[probe] gateway.discord.gg websocket OK:', String(m.data).slice(0, 60)); ws.close(); });
-      ws.addEventListener('error', (e) => { clearTimeout(timer); console.error('[probe] gateway.discord.gg websocket error:', e?.message || 'connection failed'); });
-    } catch (err) {
-      console.error('[probe] websocket test failed:', err?.message || err);
-    }
-  })();
 
   // gateway / network problems used to be silent: now they are printed
   client.on(Events.Error, (err) => console.error('[discord] client error:', err?.message || err));

@@ -98,14 +98,38 @@ export function pitLine(pit, state) {
   return parts.length ? parts.join('  ·  ') : '⚪ normal';
 }
 
+// start lights / DELAYED START (event type "startlights", state: delayed | aborted | sequence | lights_out | delay_cleared | abort_cleared)
+const START_STATES = {
+  delayed:       { emoji: '🔴', title: 'DELAYED START',        detail: 'The start is delayed - all five red lights stay on. Stand by, the race has NOT started.', color: COLOR.red },
+  aborted:       { emoji: '🟡', title: 'START ABORTED',        detail: 'The start has been aborted - stay in your grid slot and wait for race control.', color: COLOR.yellow },
+  sequence:      { emoji: '🔴', title: 'START SEQUENCE',       detail: 'The start lights sequence has begun.', color: COLOR.red },
+  lights_out:    { emoji: '🟢', title: 'LIGHTS OUT',           detail: 'Lights out and away we go - the race has started!', color: COLOR.green },
+  delay_cleared: { emoji: '⚪', title: 'DELAY OVER',           detail: 'The delayed start signal was removed.', color: COLOR.grey },
+  abort_cleared: { emoji: '⚪', title: 'ABORT CLEARED',        detail: 'The aborted start signal was removed.', color: COLOR.grey },
+};
+export function startEmbed(ev, now) {
+  const d = START_STATES[String(ev.state || '').toLowerCase()];
+  if (!d) return null;
+  const when = ev.t ? new Date(Number(ev.t) * 1000) : new Date(now);
+  return { title: `${d.emoji}  ${d.title}`, description: d.detail, color: d.color, timestamp: when.toISOString() };
+}
+// the live status shows a "Start" line only while a delayed / aborted start is up
+export function startLine(start) {
+  if (start === 'delayed') return '🔴 **DELAYED START** - all five reds stay on, stand by';
+  if (start === 'aborted') return '🟡 **START ABORTED**';
+  return '';
+}
+
 // the one live message that is edited all the time
 export function statusEmbed(st) {
   const d = describeFlag(st);
+  const startText = startLine(st.start);
   return {
     title: 'RACE CONTROL - LIVE STATUS',
-    color: d.color,
+    color: startText && st.start === 'delayed' ? COLOR.red : d.color,
     fields: [
       { name: 'Session', value: sessionLine(st), inline: false },
+      ...(startText ? [{ name: 'Start', value: startText, inline: false }] : []),
       { name: 'Track status', value: `${d.emoji} **${d.title}**\n${d.detail}`, inline: false },
       { name: 'Sectors', value: sectorsLine(st.sectors), inline: false },
       { name: 'Pit exit', value: pitLine(st.pit, st.state), inline: false },
