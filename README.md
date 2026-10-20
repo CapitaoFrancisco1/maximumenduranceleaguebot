@@ -87,3 +87,18 @@ All the texts, emojis and colours are in `format.js`. Switches in `.env`:
 * `HTTP 404/ timeout` -> wrong `BOT_URL`, or the bot is not running. Open `https://YOUR-BOT-ADDRESS/health` in a browser: it must show `{"ok":true,...}`.
 * The bot says `CANNOT USE CHANNEL_ID` -> wrong id, or the bot cannot see that channel.
 * After a restart the bot makes a new live message: it finds the old one if it may read the channel history; for a host that keeps no files you can also set `DATA_DIR` to a persistent volume.
+
+
+## When something does not work
+
+Open `https://YOUR-BOT-ADDRESS/health`. It shows exactly where the chain breaks:
+
+* `"discordReady": false` and a `discordError` -> the bot is NOT connected to Discord. The text says why (for example *An invalid token was provided* = copy the new `DISCORD_TOKEN`; *no answer from Discord* = a hosting / network problem, the bot keeps trying again by itself).
+* `"lastEvent": null` -> Roblox has not reached the bot yet (check `BOT_URL` / `API_KEY` in the `DiscordRelay` script and Roblox's Output window).
+* `"lastEvent"` has a time but the channel stays empty -> Roblox reaches the bot, the problem is Discord: wrong `CHANNEL_ID`, or the bot may not see / write / embed in that channel (the deploy log prints the reason).
+
+Messages that arrive while the bot is still connecting wait up to 40 seconds and are then posted in order.
+
+`KEEP_ALIVE=true` (needs the `RENDER_EXTERNAL_URL` variable, which Render sets by itself) stops a free Render service from being put to sleep.
+
+**Never put the real token, the API key or the IDs into `.env.example`, `index.js` or the README.** Those files go to GitHub. Real values belong only in the host's Environment settings (and your local `.env`, which `.gitignore` keeps out of GitHub).

@@ -55,10 +55,28 @@ const current = {
 };
 
 // ---- discord ------------------------------------------------------------------------------------------
-const client = new Client({ intents: [GatewayIntentBits.Guilds] });
-let ready = false;
+let client = null;            // created by connect() (below), re-created if a login attempt fails
+let ready = false;            // true once Discord has accepted the bot
+let discordError = '';        // the last reason the connection failed (shown on /health)
+let lastEvent = null;         // the last thing Roblox sent (shown on /health)
+const startedAt = Date.now();
+
+function withTimeout(promise, ms, label) {
+  let timer;
+  const timeout = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`${label} timed out after ${Math.round(ms / 1000)}s`)), ms); });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// events can arrive a few seconds before the bot has finished connecting (Roblox sends "hello" at once): wait for it
+async function waitReady(ms = 40_000) {
+  const until = Date.now() + ms;
+  while (!ready && Date.now() < until) await sleep(250);
+  if (!ready) throw new Error('not connected to Discord (message dropped)' + (discordError ? ': ' + discordError : ''));
+}
 
 async function channelOf(id) {
+  await waitReady();
   const ch = await client.channels.fetch(id);
   if (!ch || !ch.isTextBased()) throw new Error(`channel ${id} is not a text channel the bot can see`);
   return ch;
@@ -67,7 +85,7 @@ async function channelOf(id) {
 // everything that goes to Discord is sent one after the other, in order
 let chain = Promise.resolve();
 function enqueue(job) {
-  chain = chain.then(job).catch((err) => console.error('[discord]', err?.message || err));
+  chain = chain.then(() => withTimeout(Promise.resolve().then(job), 60_000, 'Discord request')).catch((err) => console.error('[discord]', err?.message || err));
 }
 
 async function sendEmbed(channelId, embed) {
@@ -182,7 +200,13 @@ const hits = new Map();
 setInterval(() => hits.clear(), 60_000).unref();
 
 app.get('/', (_req, res) => res.type('text').send('Race control bot is running.'));
-app.get('/health', (_req, res) => res.json({ ok: true, discordReady: ready || DRY_RUN }));
+app.get('/health', (_req, res) => res.json({
+  ok: true,
+  discordReady: ready || DRY_RUN,
+  discordError: discordError || undefined,       // why the connection to Discord is not working (if it is not)
+  uptimeSeconds: Math.round((Date.now() - startedAt) / 1000),
+  lastEvent,                                      // the last thing Roblox sent: proves Roblox reaches this bot
+}));
 
 app.post('/event', (req, res) => {
   const ip = req.ip;
@@ -194,6 +218,7 @@ app.post('/event', (req, res) => {
   }
   if (!req.body || typeof req.body !== 'object') return res.status(400).json({ ok: false, error: 'json body needed' });
   console.log('[event]', req.body.type, req.body.state || req.body.kind || req.body.mode || '');
+  lastEvent = { type: String(req.body.type), at: new Date().toISOString() };
   if (!handleEvent(req.body)) return res.status(400).json({ ok: false, error: 'unknown event type' });
   res.json({ ok: true });
 });
@@ -203,28 +228,25 @@ app.listen(PORT, () => console.log(`HTTP listening on port ${PORT}`));
 // ---- start discord -----------------------------------------------------------------------------------------------
 process.on('unhandledRejection', (err) => console.error('[unhandled]', err?.message || err));
 
-if (!DRY_RUN) {
-  console.log(`Node ${process.version} - connecting to Discord...`);
-  console.log(`Settings found: DISCORD_TOKEN=${TOKEN ? 'yes (' + TOKEN.length + ' characters)' : 'NO'}, CHANNEL_ID=${CHANNEL_ID ? 'yes' : 'NO'}, API_KEY=${API_KEY ? 'yes' : 'NO'}, GUILD_ID=${GUILD_ID ? 'yes' : 'no'}`);
+const LOGIN_TIMEOUT_MS = Number(env.LOGIN_TIMEOUT_MS || 60_000);   // how long one login attempt may take
+const RETRY_SCALE = Number(env.RETRY_SCALE || 1);                  // (only for testing: makes the waits between attempts shorter)
 
-  // gateway / network problems used to be silent: now they are printed
-  client.on(Events.Error, (err) => console.error('[discord] client error:', err?.message || err));
-  client.on(Events.Warn, (msg) => console.warn('[discord] warning:', msg));
-  client.on(Events.ShardError, (err) => console.error('[discord] connection error:', err?.message || err));
-  client.on(Events.ShardReady, (id) => console.log(`[discord] shard ${id} connected`));
-  client.on(Events.ShardDisconnect, (event, id) => console.warn(`[discord] shard ${id} disconnected (code ${event?.code})`));
-  client.rest.on('rateLimited', (info) => console.warn(`[discord] RATE LIMITED on ${info.method} ${info.route}: wait ${Math.ceil((info.timeToReset || 0) / 1000)}s (global: ${info.global})`));
-  if (env.DEBUG_DISCORD === 'true') client.on(Events.Debug, (msg) => console.log('[discord debug]', msg));
+function createClient() {
+  const c = new Client({ intents: [GatewayIntentBits.Guilds] });
 
-  const watchdog = setInterval(() => {
-    if (ready) { clearInterval(watchdog); return; }
-    console.error('[discord] still NOT connected to Discord after waiting. Possible reasons: wrong DISCORD_TOKEN on this host, this host\'s IP address is blocked / rate limited by Discord, or an unsupported Node version. Set DEBUG_DISCORD=true to see more.');
-  }, 30_000);
-  watchdog.unref();
+  // gateway / network problems are printed instead of staying silent
+  c.on(Events.Error, (err) => console.error('[discord] client error:', err?.message || err));
+  c.on(Events.Warn, (msg) => console.warn('[discord] warning:', msg));
+  c.on(Events.ShardError, (err) => console.error('[discord] connection error:', err?.message || err));
+  c.on(Events.ShardReady, (id) => console.log(`[discord] shard ${id} connected`));
+  c.on(Events.ShardDisconnect, (event, id) => console.warn(`[discord] shard ${id} disconnected (code ${event?.code})`));
+  c.rest.on('rateLimited', (info) => console.warn(`[discord] RATE LIMITED on ${info.method} ${info.route}: wait ${Math.ceil((info.timeToReset || 0) / 1000)}s (global: ${info.global})`));
+  if (env.DEBUG_DISCORD === 'true') c.on(Events.Debug, (msg) => console.log('[discord debug]', msg));
 
-  client.once(Events.ClientReady, async (c) => {
+  c.once(Events.ClientReady, async (cl) => {
     ready = true;
-    console.log(`Logged in as ${c.user.tag} - the bot is in ${c.guilds.cache.size} server(s)`);
+    discordError = '';
+    console.log(`Logged in as ${cl.user.tag} - the bot is in ${cl.guilds.cache.size} server(s)`);
     try { await channelOf(CHANNEL_ID); console.log('Race control channel found.'); }
     catch (err) { console.error('CANNOT USE CHANNEL_ID:', err.message, '- is the bot in the server and allowed to see / write in that channel?'); }
 
@@ -232,17 +254,74 @@ if (!DRY_RUN) {
       try {
         const rest = new REST({ version: '10' }).setToken(TOKEN);
         const cmd = new SlashCommandBuilder().setName('status').setDescription('Show the current race status');
-        await rest.put(Routes.applicationGuildCommands(c.user.id, GUILD_ID), { body: [cmd.toJSON()] });
+        await rest.put(Routes.applicationGuildCommands(cl.user.id, GUILD_ID), { body: [cmd.toJSON()] });
         console.log('/status registered');
       } catch (err) { console.warn('could not register /status:', err.message); }
     }
     refreshStatus();
   });
 
-  client.on(Events.InteractionCreate, async (i) => {
+  c.on(Events.InteractionCreate, async (i) => {
     if (!i.isChatInputCommand() || i.commandName !== 'status') return;
     await i.reply({ embeds: [statusEmbed(current)], allowedMentions: { parse: [] } });
   });
+  return c;
+}
 
-  client.login(TOKEN).catch((err) => { console.error('Discord login failed:', err.message); process.exit(1); });
+// log in; if Discord does not answer (a hosting / network problem) try again with a fresh client instead of waiting for ever
+async function connect() {
+  const waits = [5, 15, 30, 60, 120];
+  console.log(`Node ${process.version} - connecting to Discord...`);
+  console.log(`Settings found: DISCORD_TOKEN=${TOKEN ? 'yes (' + TOKEN.length + ' characters)' : 'NO'}, CHANNEL_ID=${CHANNEL_ID ? 'yes' : 'NO'}, API_KEY=${API_KEY ? 'yes' : 'NO'}, GUILD_ID=${GUILD_ID ? 'yes' : 'no'}`);
+
+  for (let attempt = 1; !ready; attempt++) {
+    client = createClient();
+    console.log(`[discord] login attempt ${attempt}...`);
+    try {
+      await withTimeout(client.login(TOKEN), LOGIN_TIMEOUT_MS, 'Discord login');
+      for (let i = 0; i < 80 && !ready; i++) await sleep(500);          // "ready" follows the login a moment later
+      if (ready) return;
+      throw new Error('logged in, but the connection never became ready');
+    } catch (err) {
+      const msg = String(err?.message || err);
+      discordError = msg;
+      console.error('[discord] login failed:', msg);
+      try { await client.destroy(); } catch { /* already closed */ }
+
+      if (/invalid token|TokenInvalid/i.test(msg)) {
+        console.error('[discord] The DISCORD_TOKEN is wrong, or it was reset. Copy the NEW token (Developer Portal -> Bot -> Reset Token) into the environment variable DISCORD_TOKEN and redeploy. Not trying again.');
+        return;
+      }
+      if (/disallowed intent|intents/i.test(msg)) {
+        console.error('[discord] Discord refused the intents. This bot only needs the default ones - nothing has to be switched on in the Developer Portal. Not trying again.');
+        return;
+      }
+      const wait = waits[Math.min(attempt - 1, waits.length - 1)] * RETRY_SCALE;
+      console.error(`[discord] trying again in ${wait}s`);
+      await sleep(wait * 1000);
+    }
+  }
+}
+
+// free hosts put a service to sleep when nobody visits it. KEEP_ALIVE=true makes the bot visit its own /health every 10 minutes
+if (env.KEEP_ALIVE === 'true') {
+  const self = env.RENDER_EXTERNAL_URL || env.PUBLIC_URL;
+  if (self) {
+    setInterval(() => { fetch(self.replace(/\/+$/, '') + '/health').catch(() => {}); }, 10 * 60_000).unref();
+    console.log('keep-alive on: calling ' + self + '/health every 10 minutes');
+  } else {
+    console.warn('KEEP_ALIVE=true but RENDER_EXTERNAL_URL / PUBLIC_URL is not set - nothing to ping');
+  }
+}
+
+// a redeploy stops the old copy: leave Discord cleanly so two copies never run at once
+for (const signal of ['SIGTERM', 'SIGINT']) {
+  process.on(signal, async () => {
+    try { await client?.destroy(); } catch { /* ignore */ }
+    process.exit(0);
+  });
+}
+
+if (!DRY_RUN) {
+  connect().catch((err) => console.error('[discord] connect crashed:', err?.message || err));
 }
